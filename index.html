@@ -131,7 +131,10 @@
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
+      text-decoration:none;
     }
+
+    .btn svg{ display:block; }
 
     .btn:hover{ background: var(--soft); }
     .btn:active{ transform: translateY(1px); }
@@ -266,9 +269,43 @@
 
     .toast.show{ opacity:1; transform: translateX(-50%) translateY(-2px); }
 
+    /* Motion + feedback (subtle, memorable) */
+    .btn{ transition: background .18s ease, transform .18s ease, color .18s ease, border-color .18s ease; }
+    .btn.pop{ animation: pop .22s cubic-bezier(.2,.9,.2,1); }
+
+    .row{ transition: background .15s ease, transform .18s ease, opacity .18s ease, max-height .22s ease, margin .22s ease, padding .22s ease; }
+    .row.enter{ animation: rowIn .34s cubic-bezier(.2,.85,.2,1); }
+    .row.pulse{ animation: pulse .26s cubic-bezier(.2,.85,.2,1); }
+    .row.exit{
+      overflow:hidden;
+      opacity:0;
+      transform: translateY(-6px) scale(.985);
+      max-height:0 !important;
+      padding-top:0 !important;
+      padding-bottom:0 !important;
+      margin-top:0 !important;
+      margin-bottom:0 !important;
+    }
+
+    .check{ transition: transform .18s ease, background .22s ease, border-color .22s ease, box-shadow .22s ease; }
+    .check:active{ transform: scale(.94); }
+    .check svg{ transition: opacity .18s ease; }
+    .check path{ stroke-dasharray: 24; stroke-dashoffset: 24; transition: stroke-dashoffset .22s ease; }
+    .done .check path{ stroke-dashoffset: 0; }
+    .no-check-anim .check path{ stroke-dashoffset: 24 !important; }
+
+    .icon{ transition: background .15s ease, transform .18s ease, color .18s ease; }
+    .icon:active{ transform: scale(.96); }
+
+    @keyframes rowIn{ from{ opacity:0; transform: translateY(10px) scale(.985);} to{ opacity:1; transform:none;} }
+    @keyframes pop{ 0%{ transform: scale(1);} 45%{ transform: scale(1.03);} 100%{ transform: scale(1);} }
+    @keyframes pulse{ 0%{ transform: scale(1);} 40%{ transform: scale(1.01);} 100%{ transform: scale(1);} }
+
     @media (prefers-reduced-motion: reduce){
       .btn:active{ transform:none; }
       .toast{ transition:none; }
+      .row.enter, .row.pulse, .btn.pop{ animation:none; }
+      .row, .btn, .check, .icon, .check path{ transition:none; }
     }
   </style>
 </head>
@@ -280,9 +317,17 @@
           <div class="title">AirTasks</div>
           <div class="sub">Tasks are saved on your device. You can share the list using the link.</div>
         </div>
-        <button class="btn" id="shareBtn" type="button" title="Copy shareable link">
-          <span class="label">Share link</span>
-        </button>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+          <a class="btn" id="contributeBtn" href="https://github.com/iamdinakar/AirTasks" target="_blank" rel="noopener noreferrer" title="Open GitHub repository" aria-label="Contribute on GitHub">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.5 2.87 8.32 6.84 9.67.5.1.68-.22.68-.48 0-.24-.01-.86-.01-1.69-2.78.62-3.37-1.1-3.37-1.1-.45-1.19-1.11-1.5-1.11-1.5-.9-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.67.35-1.12.63-1.38-2.22-.26-4.56-1.15-4.56-5.1 0-1.13.39-2.05 1.03-2.77-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.06.8-.23 1.65-.34 2.5-.35.85.01 1.7.12 2.5.35 1.9-1.34 2.75-1.06 2.75-1.06.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.77 0 3.96-2.34 4.84-4.57 5.1.36.32.68.96.68 1.94 0 1.4-.01 2.53-.01 2.88 0 .26.18.58.69.48A10.17 10.17 0 0 0 22 12.26C22 6.58 17.52 2 12 2z"/>
+            </svg>
+            <span class="label">Contribute</span>
+          </a>
+          <button class="btn" id="shareBtn" type="button" title="Copy shareable link">
+            <span class="label">Share link</span>
+          </button>
+        </div>
       </header>
 
       <div class="panel" role="application" aria-label="Task list">
@@ -329,6 +374,11 @@
     const toastEl = $("toast");
 
     const state = { v: 1, tasks: [] };
+
+    // For micro-animations after re-render
+    let lastAddedId = null;
+    let lastToggledId = null;
+    let lastToggledToDone = false;
 
     const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -427,12 +477,17 @@
       if (!okHash) loadFromLocal();
       render();
       inputEl.focus();
+
+      // Optional internal tests: add ?test=1 to URL
+      if (new URLSearchParams(location.search).get("test") === "1") runTests();
     }
 
     function addTask(text){
       const t = (text ?? "").trim();
       if (!t) return;
-      state.tasks.unshift({ id: uid(), text: t, done: false });
+      const id = uid();
+      state.tasks.unshift({ id, text: t, done: false });
+      lastAddedId = id;
       inputEl.value = "";
       persist();
     }
@@ -441,6 +496,8 @@
       const t = state.tasks.find(x => x.id === id);
       if (!t) return;
       t.done = !t.done;
+      lastToggledId = id;
+      lastToggledToDone = t.done;
       persist();
     }
 
@@ -475,6 +532,14 @@
     }
 
     function render(){
+      const addedId = lastAddedId;
+      const toggledId = lastToggledId;
+      const toggledToDone = lastToggledToDone;
+
+      lastAddedId = null;
+      lastToggledId = null;
+      lastToggledToDone = false;
+
       statsEl.textContent = statsText();
       listEl.innerHTML = "";
 
@@ -493,6 +558,15 @@
       for (const t of state.tasks){
         const li = document.createElement("li");
         li.className = "row" + (t.done ? " done" : "");
+        li.dataset.id = t.id;
+
+        // post-render delight
+        if (t.id === addedId) li.classList.add("enter");
+        if (t.id === toggledId) li.classList.add("pulse");
+
+        // For the checkmark draw animation: start hidden then reveal next frame.
+        const shouldDrawCheck = (t.id === toggledId && toggledToDone && t.done);
+        if (shouldDrawCheck) li.classList.add("no-check-anim");
 
         const check = document.createElement("div");
         check.className = "check";
@@ -528,12 +602,22 @@
             toggleTask(t.id);
           }
         });
-        del.addEventListener("click", () => deleteTask(t.id));
+        del.addEventListener("click", () => {
+          // animate collapse, then delete
+          li.style.maxHeight = li.offsetHeight + "px";
+          li.classList.add("exit");
+          setTimeout(() => deleteTask(t.id), 190);
+        });
 
         li.appendChild(check);
         li.appendChild(txt);
         li.appendChild(del);
         listEl.appendChild(li);
+
+        // Trigger the checkmark draw after DOM insertion.
+        if (shouldDrawCheck){
+          requestAnimationFrame(() => li.classList.remove("no-check-anim"));
+        }
       }
     }
 
@@ -557,12 +641,68 @@
       }
     }
 
+    function popButton(el){
+      if (!el) return;
+      el.classList.remove("pop");
+      void el.offsetWidth; // restart animation
+      el.classList.add("pop");
+    }
+
+    // --- Lightweight in-page tests (run with ?test=1) ---
+    function runTests(){
+      const results = [];
+      const ok = (name, cond) => results.push({ name, pass: !!cond });
+      const eq = (name, a, b) => results.push({ name, pass: Object.is(a,b), got: a, expected: b });
+
+      // Test 1: base64url roundtrip
+      const s = "Hello ✓ 你好 مرحبا";
+      eq("base64url roundtrip", fromBase64Url(toBase64Url(s)), s);
+
+      // Test 2: serialize/deserialize roundtrip
+      const snap = JSON.stringify(state);
+      state.tasks = [
+        { id: "a", text: "Task one", done: false },
+        { id: "b", text: "Task two", done: true }
+      ];
+      const tasks2 = deserialize(serialize());
+      ok("deserialize returns 2 tasks", tasks2.length === 2);
+      eq("task b done", tasks2[1].done, true);
+
+      // Test 3: render empty should not throw even if toggled vars set
+      state.tasks = [];
+      lastToggledId = "x";
+      lastToggledToDone = true;
+      try { render(); ok("render empty no throw", true); } catch(e){ ok("render empty no throw", false); }
+
+      // Restore
+      try { Object.assign(state, JSON.parse(snap)); } catch {}
+
+      const passed = results.filter(r => r.pass).length;
+      console.log("AirTasks tests:", results);
+      toast(`Tests: ${passed}/${results.length}`);
+    }
+
     // Events
-    $("addBtn").addEventListener("click", () => addTask(inputEl.value));
-    inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") addTask(inputEl.value);
+    $("addBtn").addEventListener("click", () => {
+      popButton($("addBtn"));
+      addTask(inputEl.value);
     });
-    $("shareBtn").addEventListener("click", shareLink);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter"){
+        popButton($("addBtn"));
+        addTask(inputEl.value);
+      }
+    });
+    $("shareBtn").addEventListener("click", () => {
+      popButton($("shareBtn"));
+      shareLink();
+    });
+
+    // Contribute button: keep animation parity with other primary actions
+    const contributeEl = $("contributeBtn");
+    if (contributeEl){
+      contributeEl.addEventListener("click", () => popButton(contributeEl));
+    }
     $("clearDoneBtn").addEventListener("click", clearDone);
     $("resetBtn").addEventListener("click", resetAll);
 
