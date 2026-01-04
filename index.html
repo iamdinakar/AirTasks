@@ -17,6 +17,8 @@
       --shadow: 0 18px 60px rgba(0,0,0,.08);
       --radius: 20px;
       --radius2: 14px;
+      --success:#22c55e;
+      --success2:#16a34a;
     }
     @media (prefers-color-scheme: dark){
       :root{
@@ -28,6 +30,8 @@
         --soft:rgba(255,255,255,.06);
         --focus:rgba(255,255,255,.22);
         --shadow: 0 22px 70px rgba(0,0,0,.55);
+        --success:#34d399;
+        --success2:#16a34a;
       }
     }
 
@@ -180,6 +184,7 @@
     }
 
     .row{
+      position: relative;
       display:flex;
       align-items:center;
       gap: 12px;
@@ -189,6 +194,36 @@
     }
 
     .row:hover{ background: var(--soft); }
+
+    /* Celebrate a completed task (green highlight) */
+    .celebrate{
+      background: color-mix(in srgb, var(--success) 16%, transparent) !important;
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 32%, transparent) inset;
+    }
+    .celebrate .check{
+      background: var(--success) !important;
+      border-color: transparent !important;
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 18%, transparent);
+    }
+    .celebrate .check svg{ opacity:1 !important; }
+
+    /* Confetti layer */
+    #confettiLayer{
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 50;
+    }
+    .confetti{
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      opacity: .95;
+      will-change: transform, opacity;
+      filter: saturate(1.05);
+    }
 
     .check{
       width: 22px;
@@ -358,6 +393,7 @@
     </div>
   </div>
 
+  <div id="confettiLayer" aria-hidden="true"></div>
   <div class="toast" id="toast" aria-live="polite"></div>
 
   <script>
@@ -379,6 +415,7 @@
     let lastAddedId = null;
     let lastToggledId = null;
     let lastToggledToDone = false;
+    let lastCelebratedId = null;
 
     const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -410,7 +447,6 @@
     }
 
     function serialize(){
-      // compact payload for URL
       return JSON.stringify({
         v: 1,
         t: state.tasks.map(x => [x.id, x.text, x.done ? 1 : 0])
@@ -472,7 +508,6 @@
     }
 
     function init(){
-      // Priority: shared link > local
       const okHash = loadFromHash();
       if (!okHash) loadFromLocal();
       render();
@@ -498,6 +533,7 @@
       t.done = !t.done;
       lastToggledId = id;
       lastToggledToDone = t.done;
+      lastCelebratedId = t.done ? id : null;
       persist();
     }
 
@@ -535,10 +571,13 @@
       const addedId = lastAddedId;
       const toggledId = lastToggledId;
       const toggledToDone = lastToggledToDone;
+      const celebratedId = lastCelebratedId;
 
+      // clear one-shot flags
       lastAddedId = null;
       lastToggledId = null;
       lastToggledToDone = false;
+      lastCelebratedId = null;
 
       statsEl.textContent = statsText();
       listEl.innerHTML = "";
@@ -560,12 +599,13 @@
         li.className = "row" + (t.done ? " done" : "");
         li.dataset.id = t.id;
 
-        // post-render delight
         if (t.id === addedId) li.classList.add("enter");
         if (t.id === toggledId) li.classList.add("pulse");
 
-        // For the checkmark draw animation: start hidden then reveal next frame.
         const shouldDrawCheck = (t.id === toggledId && toggledToDone && t.done);
+        const shouldCelebrate = (t.id === celebratedId && toggledToDone && t.done);
+
+        if (shouldCelebrate) li.classList.add("celebrate");
         if (shouldDrawCheck) li.classList.add("no-check-anim");
 
         const check = document.createElement("div");
@@ -602,8 +642,8 @@
             toggleTask(t.id);
           }
         });
+
         del.addEventListener("click", () => {
-          // animate collapse, then delete
           li.style.maxHeight = li.offsetHeight + "px";
           li.classList.add("exit");
           setTimeout(() => deleteTask(t.id), 190);
@@ -614,9 +654,12 @@
         li.appendChild(del);
         listEl.appendChild(li);
 
-        // Trigger the checkmark draw after DOM insertion.
         if (shouldDrawCheck){
           requestAnimationFrame(() => li.classList.remove("no-check-anim"));
+        }
+        if (shouldCelebrate){
+          requestAnimationFrame(() => fireConfettiAt(check));
+          setTimeout(() => li.classList.remove("celebrate"), 950);
         }
       }
     }
@@ -628,7 +671,6 @@
         await navigator.clipboard.writeText(url);
         toast("Link copied");
       }catch{
-        // fallback
         const ta = document.createElement("textarea");
         ta.value = url;
         ta.style.position = "fixed";
@@ -644,8 +686,64 @@
     function popButton(el){
       if (!el) return;
       el.classList.remove("pop");
-      void el.offsetWidth; // restart animation
+      void el.offsetWidth;
       el.classList.add("pop");
+    }
+
+    const prefersReducedMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function fireConfettiAt(anchorEl){
+      if (!anchorEl || prefersReducedMotion()) return;
+
+      const layer = document.getElementById("confettiLayer");
+      if (!layer) return;
+
+      const r = anchorEl.getBoundingClientRect();
+      const x = r.left + r.width * 0.5;
+      const y = r.top + r.height * 0.45;
+
+      const colors = [
+        "#22c55e", "#16a34a", "#4ade80", "#a3e635", "#facc15",
+        "rgba(255,255,255,.92)"
+      ];
+
+      const pieces = 16;
+      for (let i = 0; i < pieces; i++){
+        const p = document.createElement("div");
+        p.className = "confetti";
+
+        const size = 5 + Math.random() * 5;
+        p.style.width = size + "px";
+        p.style.height = (size * (0.6 + Math.random() * 0.8)) + "px";
+        p.style.borderRadius = (2 + Math.random() * 3) + "px";
+        p.style.background = colors[(Math.random() * colors.length) | 0];
+
+        p.style.left = (x - size / 2) + "px";
+        p.style.top = (y - size / 2) + "px";
+
+        layer.appendChild(p);
+
+        const angle = (Math.random() * Math.PI * 2);
+        const power = 70 + Math.random() * 140;
+        const dx = Math.cos(angle) * power;
+        const dy = Math.sin(angle) * power - (120 + Math.random() * 120);
+        const spin = (Math.random() * 720 - 360);
+
+        const duration = 820 + Math.random() * 420;
+        const drift = 90 + Math.random() * 160;
+
+        const anim = p.animate([
+          { transform: `translate(0px, 0px) rotate(0deg)`, opacity: 1 },
+          { transform: `translate(${dx}px, ${dy}px) rotate(${spin * 0.6}deg)`, opacity: 1, offset: 0.65 },
+          { transform: `translate(${dx * 1.15}px, ${dy + drift}px) rotate(${spin}deg)`, opacity: 0 }
+        ], {
+          duration,
+          easing: "cubic-bezier(.2,.8,.2,1)",
+          fill: "forwards"
+        });
+
+        anim.onfinish = () => p.remove();
+      }
     }
 
     // --- Lightweight in-page tests (run with ?test=1) ---
@@ -668,14 +766,25 @@
       ok("deserialize returns 2 tasks", tasks2.length === 2);
       eq("task b done", tasks2[1].done, true);
 
-      // Test 3: render empty should not throw even if toggled vars set
+      // Test 3: render empty should not throw even if flags set
       state.tasks = [];
       lastToggledId = "x";
       lastToggledToDone = true;
+      lastCelebratedId = "x";
       try { render(); ok("render empty no throw", true); } catch(e){ ok("render empty no throw", false); }
+
+      // Test 4: flags are cleared after render
+      state.tasks = [{ id: "x", text: "X", done: true }];
+      lastToggledId = "x";
+      lastToggledToDone = true;
+      lastCelebratedId = "x";
+      render();
+      ok("lastCelebratedId cleared", lastCelebratedId === null);
 
       // Restore
       try { Object.assign(state, JSON.parse(snap)); } catch {}
+
+      ok("fireConfettiAt exists", typeof fireConfettiAt === "function");
 
       const passed = results.filter(r => r.pass).length;
       console.log("AirTasks tests:", results);
@@ -698,11 +807,11 @@
       shareLink();
     });
 
-    // Contribute button: keep animation parity with other primary actions
     const contributeEl = $("contributeBtn");
     if (contributeEl){
       contributeEl.addEventListener("click", () => popButton(contributeEl));
     }
+
     $("clearDoneBtn").addEventListener("click", clearDone);
     $("resetBtn").addEventListener("click", resetAll);
 
